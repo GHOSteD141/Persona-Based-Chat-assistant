@@ -1,0 +1,16 @@
+build/GemmaVoiceOS/Analysis-00.toc
+build/GemmaVoiceOS/base_library.zip
+build/GemmaVoiceOS/EXE-00.toc
+build/GemmaVoiceOS/GemmaVoiceOS.pkg
+build/GemmaVoiceOS/localpycs/pyimod02_importers.pyc
+build/GemmaVoiceOS/localpycs/pyimod01_archive.pyc
+build/GemmaVoiceOS/localpycs/pyimod03_ctypes.pyc
+build/GemmaVoiceOS/localpycs/pyimod04_pywin32.pyc
+build/GemmaVoiceOS/localpycs/struct.pyc
+build/GemmaVoiceOS/PKG-00.toc
+build/GemmaVoiceOS/PYZ-00.pyz
+build/GemmaVoiceOS/PYZ-00.toc
+build/GemmaVoiceOS/warn-GemmaVoiceOS.txt
+build/GemmaVoiceOS/xref-GemmaVoiceOS.html
+dist/GemmaVoiceOS.exe
+GemmaVoiceOS.spec

@@ -14,3 +14,14 @@ build/GemmaVoiceOS/warn-GemmaVoiceOS.txt
 build/GemmaVoiceOS/xref-GemmaVoiceOS.html
 dist/GemmaVoiceOS.exe
 GemmaVoiceOS.spec
+# Ignore PyInstaller build folders
+build/
+dist/
+*.spec
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore environment variables or keys (good practice)
+.env

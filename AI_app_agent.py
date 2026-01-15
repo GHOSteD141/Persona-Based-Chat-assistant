@@ -1,6 +1,6 @@
 print("[DEBUG] Importing libraries...")
 import customtkinter as ctk
-import tkinter as tk  # Needed for the Right-Click Menu
+import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
 import asyncio
@@ -67,16 +67,12 @@ class AssistantBackend:
         except Exception as e:
             print(f"[ERROR] Failed to init Audio: {e}")
 
-        # Session Management
         self.sessions_dir = "saved_chats"
         if not os.path.exists(self.sessions_dir):
             os.makedirs(self.sessions_dir)
             
         self.current_session_file = None
         self.history = []
-        
-        # 🚨 CHANGE: Do NOT start new session immediately. 
-        # We wait for the GUI to ask for the last session.
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -103,19 +99,15 @@ class AssistantBackend:
             return ["gemma3:4b"] 
 
     def load_last_session(self):
-        """Finds the most recent chat file and loads it."""
         files = glob.glob(os.path.join(self.sessions_dir, "*.json"))
         if not files:
             self.start_new_session()
-            return False # No previous chat found
-        
-        # Sort by modification time (newest first)
+            return False
         latest_file = max(files, key=os.path.getmtime)
         return self.load_session(latest_file)
 
     def start_new_session(self):
-        """Prepares a new session but doesn't create file yet (avoids empty files)"""
-        self.current_session_file = None # Will generate filename on first save
+        self.current_session_file = None
         self.history = []
 
     def load_session(self, filepath):
@@ -130,21 +122,16 @@ class AssistantBackend:
         return False
 
     def delete_session(self, filepath):
-        """Deletes a chat file and resets if it was the active one"""
         try:
             if os.path.exists(filepath):
                 os.remove(filepath)
-                
-            # If we deleted the current chat, clear memory
             if self.current_session_file == filepath:
                 self.start_new_session()
-                return True # Indicates current chat was deleted
-        except Exception as e:
-            print(f"Delete error: {e}")
+                return True
+        except: pass
         return False
 
     def save_history(self):
-        # If this is the first message of a new chat, create the filename now
         if not self.current_session_file:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             self.current_session_file = os.path.join(self.sessions_dir, f"chat_{timestamp}.json")
@@ -166,7 +153,6 @@ class AssistantBackend:
 
     def get_saved_sessions(self):
         files = glob.glob(os.path.join(self.sessions_dir, "*.json"))
-        # Sort by newest first
         files.sort(key=os.path.getmtime, reverse=True)
         session_list = []
         for f in files:
@@ -177,12 +163,32 @@ class AssistantBackend:
             except: pass
         return session_list
 
+    # --- 🧠 NEW: AI GENERATES SMART QUERY ---
+    def generate_search_query(self, user_text):
+        """Uses the LLM to convert a chatty sentence into a search keyword string"""
+        print("[DEBUG] Generating smart search query...")
+        try:
+            # We use a separate, tiny prompt just for this task
+            response = ollama.chat(
+                model=self.config["model"],
+                messages=[{
+                    'role': 'user', 
+                    'content': f"Task: Convert this user message into a short, effective DuckDuckGo search query. Remove filler words. Return ONLY the query string.\n\nUser Message: '{user_text}'"
+                }]
+            )
+            query = response['message']['content'].strip().strip('"')
+            print(f"[DEBUG] Smart Query: '{query}'")
+            return query
+        except:
+            return user_text # Fallback to raw text if LLM fails
+
     def web_search(self, query):
         print(f"🔎 Searching web for: {query}")
         try:
-            results = DDGS().text(query, max_results=10)
+            results = DDGS().text(query, max_results=3)
             if results:
-                summary = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+                # FIX: Now including the URL (href) in the result
+                summary = "\n".join([f"- Source: {r['href']}\n  Title: {r['title']}\n  Snippet: {r['body']}" for r in results])
                 return f"Search Results for '{query}':\n{summary}\n"
         except Exception as e:
             print(f"Search Error: {e}")
@@ -203,21 +209,23 @@ class AssistantBackend:
 
         context_messages = list(self.history)
         
-        # --- 🧠 SMART PERSONA SWITCHING (The Fix) ---
         if use_web:
-            print(f"[DEBUG] Web Mode Active: FACTUALITY ENFORCED.")
-            search_data = self.web_search(user_text)
-            current_date = datetime.datetime.now().strftime("%B %Y")
+            # 1. Generate Smart Query first
+            smart_query = self.generate_search_query(user_text)
             
+            # 2. Perform Search with Smart Query
+            search_data = self.web_search(smart_query)
+            
+            current_date = datetime.datetime.now().strftime("%B %Y")
             system_context = (
                 f"Current Date: {current_date}.\n"
                 f"You are a strict Fact-Checking AI. You do NOT joke. You do NOT have a personality.\n"
                 f"Your ONLY job is to summarize the Search Results below accurately.\n"
+                f"ALWAYS cite the Source link provided in the results.\n"
                 f"IGNORE your internal training if it conflicts with these results.\n"
                 f"SEARCH RESULTS:\n{search_data}\n"
             )
         else:
-            # Normal Mode: Use the funny Predator persona
             system_context = self.config["system_prompt"]
 
         context_messages.append(user_msg)
@@ -259,7 +267,7 @@ class AssistantBackend:
 class GeminiApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Predator OS Ultimate")
+        self.title("Predator OS Ultimate (Smart Search)")
         self.geometry("1100x700")
         try: ctk.set_appearance_mode("Dark")
         except: pass
@@ -270,12 +278,9 @@ class GeminiApp(ctk.CTk):
         
         self.setup_ui()
         
-        # 🚀 STARTUP LOGIC: Load previous chat OR start fresh
         if self.backend.load_last_session():
-            print("[DEBUG] Loaded previous session.")
             self.load_chat_ui()
         else:
-            print("[DEBUG] No history found, starting fresh.")
             self.backend.start_new_session()
             self.clear_chat_display()
 
@@ -283,7 +288,7 @@ class GeminiApp(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # === LEFT SIDEBAR ===
+        # Sidebar
         self.sidebar = ctk.CTkFrame(self, width=250, fg_color=COLOR_SIDEBAR, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(2, weight=1) 
@@ -294,7 +299,6 @@ class GeminiApp(ctk.CTk):
         self.btn_new_chat = ctk.CTkButton(self.sidebar, text="+ New Chat", fg_color=COLOR_ACCENT, text_color="black", command=self.user_click_new_chat)
         self.btn_new_chat.grid(row=1, column=0, pady=10, padx=20, sticky="ew")
 
-        # History
         self.history_label = ctk.CTkLabel(self.sidebar, text="Right-click to delete:", text_color="gray", anchor="w")
         self.history_label.grid(row=2, column=0, padx=20, pady=(20,5), sticky="w")
         
@@ -302,7 +306,7 @@ class GeminiApp(ctk.CTk):
         self.history_frame.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
         self.refresh_history_ui()
 
-        # Settings
+        # Settings Area
         self.settings_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.settings_frame.grid(row=4, column=0, padx=20, pady=20, sticky="ew")
 
@@ -321,7 +325,7 @@ class GeminiApp(ctk.CTk):
         self.btn_exit = ctk.CTkButton(self.settings_frame, text="🛑 Terminate", fg_color="#cf6679", hover_color="#b00020", command=self.terminate_app)
         self.btn_exit.pack(pady=10, fill="x")
 
-        # === MAIN CHAT AREA ===
+        # Chat Area
         self.main_area = ctk.CTkFrame(self, fg_color=COLOR_BG, corner_radius=0)
         self.main_area.grid(row=0, column=1, sticky="nsew")
         self.main_area.grid_rowconfigure(0, weight=1)
@@ -331,7 +335,7 @@ class GeminiApp(ctk.CTk):
         self.chat_display.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
         self.chat_display.configure(state="disabled")
 
-        # Input Area
+        # Input
         self.input_frame = ctk.CTkFrame(self.main_area, fg_color=COLOR_SIDEBAR, height=80)
         self.input_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=20)
         self.input_frame.grid_columnconfigure(1, weight=1)
@@ -343,10 +347,8 @@ class GeminiApp(ctk.CTk):
         self.entry_msg.grid(row=0, column=1, sticky="ew", padx=10)
         self.entry_msg.bind("<Return>", self.on_send_click)
 
-        # Model Selector
         self.available_models = self.backend.get_available_models()
         self.model_var = ctk.StringVar(value=self.backend.config["model"])
-        
         self.model_dropdown = ctk.CTkOptionMenu(
             self.input_frame, 
             values=self.available_models,
@@ -364,48 +366,30 @@ class GeminiApp(ctk.CTk):
         self.btn_send = ctk.CTkButton(self.input_frame, text="➤", width=40, command=self.on_send_click)
         self.btn_send.grid(row=0, column=4, padx=10)
 
-    # --- 🗑️ RIGHT CLICK DELETE LOGIC ---
+    # --- METHODS ---
     def show_delete_menu(self, event, filepath):
-        """Creates the right-click menu"""
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="🗑️ Delete Chat", command=lambda: self.delete_chat_action(filepath))
         menu.tk_popup(event.x_root, event.y_root)
 
     def delete_chat_action(self, filepath):
-        """Actually deletes the file and updates UI"""
-        is_active_chat_deleted = self.backend.delete_session(filepath)
-        
+        is_active = self.backend.delete_session(filepath)
         self.refresh_history_ui()
-        
-        if is_active_chat_deleted:
+        if is_active:
             self.clear_chat_display()
             self.chat_display.configure(state="normal")
-            self.chat_display.insert("end", "\n[System] Chat deleted. Starting new session...\n")
+            self.chat_display.insert("end", "\n[System] Chat deleted.\n")
             self.chat_display.configure(state="disabled")
 
-    # --- UI UPDATES ---
     def refresh_history_ui(self):
         for widget in self.history_frame.winfo_children():
             widget.destroy()
-        
         sessions = self.backend.get_saved_sessions()
         for session in sessions:
             title = session["title"][:22] + "..." if len(session["title"]) > 22 else session["title"]
-            
-            btn = ctk.CTkButton(
-                self.history_frame, 
-                text=title, 
-                fg_color="transparent", 
-                border_width=1, 
-                border_color="gray", 
-                anchor="w", 
-                command=lambda p=session["path"]: self.load_old_chat(p)
-            )
+            btn = ctk.CTkButton(self.history_frame, text=title, fg_color="transparent", border_width=1, border_color="gray", anchor="w", command=lambda p=session["path"]: self.load_old_chat(p))
             btn.pack(fill="x", pady=2)
-            
-            # Bind Right Click (Windows=Button-3, Mac=Button-2)
             btn.bind("<Button-3>", lambda event, p=session["path"]: self.show_delete_menu(event, p))
-            btn.bind("<Button-2>", lambda event, p=session["path"]: self.show_delete_menu(event, p))
 
     def user_click_new_chat(self):
         self.backend.start_new_session()
@@ -430,7 +414,6 @@ class GeminiApp(ctk.CTk):
         self.chat_display.see("end")
         self.chat_display.configure(state="disabled")
 
-    # --- STANDARD LOGIC ---
     def refresh_model_list(self):
         self.update_status("Fetching Models...", "yellow")
         threading.Thread(target=self._fetch_models_thread).start()
